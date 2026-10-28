@@ -1,0 +1,23 @@
+# Lo que crea instalar.sh (los clones se guardan como parches en parches/)
+/Open-LLM-VTuber/
+/cliente-escritorio/
+
+# Tu configuración y tus datos (los ejemplos sí van: perfil.ejemplo.yaml, entorno.ejemplo.sh)
+/perfil.yaml
+/entorno.sh
+/diario/
+/habitos.jsonl
+/recuerdos_asistente.md
+/ejemplos_buenos.jsonl
+/datos/
+*/embeddings.json
+*/apps_embeddings.json
+*.log
+
+# Voz RVC: entorno y modelos
+/rvc/.venv/
+/rvc/*/
+/rvc/*.pt
+/rvc/*.pth
+
+__pycache__/

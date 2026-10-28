@@ -1,0 +1,8 @@
+# Hora en otros lugares del mundo. Sin configuración: la zona de aquí sale de identidad (perfil.yaml o el sistema).
+tema: hora_mundo
+orden: 60
+descripcion: |-
+  la hora, la fecha o la diferencia horaria de otro lugar del mundo.
+ejemplos: |-
+  {usuario}: "qué hora es en Japón" -> temas ["hora_mundo"]; {usuario}: "qué hora es" -> temas ["charla"]
+si_falla: No pudiste ver la hora de ese lugar ({error}). Díselo en una frase.

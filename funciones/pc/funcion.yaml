@@ -1,0 +1,9 @@
+# Estado del PC: lo lee acciones-mcp/servidor_acciones.py (estado_sistema). Sin configuración.
+tema: pc
+orden: 50
+descripcion: |-
+  el estado de su PC: RAM, memoria, disco, espacio, CPU, GPU, temperaturas, cuánto usa {asistente}.
+ejemplos: |-
+  {usuario}: "revisa cuánta RAM estoy usando" -> temas ["pc"]
+  {asistente}: "Tienes 11764 MB de RAM usados." / {usuario}: "usa gigas" -> orden "dime la RAM usada en gigas", temas ["pc"]
+si_falla: No pudiste ver el estado del PC ({error}). Díselo en una frase.

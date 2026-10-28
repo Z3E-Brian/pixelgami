@@ -1,0 +1,48 @@
+# Tus datos y los de la asistente, para los textos y las herramientas. Copia este archivo como perfil.yaml.
+# No son secretos: las claves van aparte en ~/.config/pixelgami/ (ver docs/CONECTAR.md).
+# Los nombres de la asistente y el tuyo están en Open-LLM-VTuber/conf.yaml (character_name, human_name).
+
+genero_usuario: m        # m o f: "él te construyó" / "ella te construyó", "molesto" / "molesta"
+genero_asistente: f      # f o m: "la asistente" / "el asistente", "sola" / "solo"
+lugar: México            # dónde vives (la hora de "aquí")
+# zona_horaria: America/Mexico_City   # opcional: por defecto la del sistema
+dialecto: español        # cómo hablas: "español", "español de España", "mexicano"... (ayuda a entenderte)
+sistema: Linux con Hyprland
+navegador: Firefox       # el predeterminado (se abre con xdg-open); también sirve para entender "ábrelo en Firefox"
+carpetas_proyectos: [Proyectos]   # dentro del home: dónde busca abrir_proyecto
+
+correo: ""               # cuenta de Gmail / Google Workspace (IMAP, con contraseña de aplicación); vacío = sin correo
+# cómo llamas a remitentes cuyo nombre no se parece al real -> texto que aparece en su dirección
+alias_remitentes:
+  la u: universidad.edu
+
+# nombres comunes -> la app que usas (ganan a la búsqueda aproximada). La clave va normalizada:
+# minúsculas, sin tildes ni espacios ("explorador de archivos" -> exploradordearchivos)
+alias_apps:
+  vscode: Visual Studio Code
+  code: Visual Studio Code
+  terminal: kitty
+  explorador: Dolphin
+  exploradordearchivos: Dolphin
+  navegador: Firefox
+  internet: Firefox
+  musica: YouTube Music Desktop App
+
+# cómo nombras algunas páginas (regex: dicho a medias o mal transcrito) -> dominio
+sitios:
+  '\bwiki\b': wikipedia.org
+# buscador propio de cada tienda: (normal, de más barato a más caro), con {q} = lo que buscas
+tiendas: {}
+
+# lo que sabe hacer: las carpetas de funciones/ activas, en este orden (si no está, todas). Ver docs/FUNCIONES.md
+# funciones: [ventanas, correo, musica, web, pc, hora_mundo, horas_juego, recordatorios]
+
+# recordatorios (opcional): ícono de las notificaciones (si no, el del tema) y CSS con la paleta de la ventanita
+# (variables --bg, --teal, --pink-soft, --f-display...; si no existe, usa una de serie). Rutas relativas a esta carpeta.
+# icono_recordatorios: ~/Imágenes/mi-asistente.png
+# estilo_css: estilo.css
+
+# palabras que Whisper debe reconocer bien (apps, juegos, proyectos); el nombre de la asistente se agrega solo
+pista_voz: >-
+  abre el explorador de archivos, Steam, Discord, Firefox, kitty, VS Code, YouTube Music,
+  en el escritorio 3, correo, spam.

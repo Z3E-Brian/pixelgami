@@ -1,0 +1,11 @@
+# Música en YouTube Music Desktop App (Companion Server activado; token en ~/.config/pixelgami/). Ver docs/CONECTAR.md.
+tema: musica
+orden: 30
+descripcion: |-
+  poner, pausar, pasar/cambiar ("pásala", "la que sigue", "quita esa"), subir/bajar música o
+    canciones (YouTube Music), qué está sonando. Buscar o poner una CANCIÓN o un artista ("busca una canción de
+    C418") es "musica", no "web".
+ejemplos: |-
+  {usuario}: "abre youtube y pon música" -> temas ["musica"]
+  {usuario}: "¿Puedes buscar una canción de Minecraft de C418?" -> temas ["musica"]
+si_falla: No pudiste controlar YouTube Music ({error}); no se puso nada. Díselo en una frase.

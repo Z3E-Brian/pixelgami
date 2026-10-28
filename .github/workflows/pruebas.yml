@@ -1,0 +1,16 @@
+name: Pruebas
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+jobs:
+  comprobar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # los parches tienen que aplicar limpio sobre el commit de upstream de parches/*/BASE
+      - name: Instalar (clonar upstream y aplicar parches)
+        run: ./instalar.sh --python
+      - name: Comprobar (compila, configs, modelo activo, importa)
+        run: Open-LLM-VTuber/.venv/bin/python herramientas/comprobar.py --importar

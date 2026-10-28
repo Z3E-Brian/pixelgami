@@ -1,0 +1,15 @@
+# Recordatorios: avisa a la hora aunque la asistente esté apagada (ver docs/CONECTAR.md).
+# Copiar a ~/.config/systemd/user/ y: systemctl --user enable --now asistente-recordatorios
+# Si instalaste en otra carpeta, cambia WorkingDirectory.
+[Unit]
+Description=Recordatorios de la asistente
+
+[Service]
+WorkingDirectory=%h/.local/share/pixelgami
+ExecStart=/usr/bin/python3 -m funciones.recordatorios.avisos vigilar
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=default.target

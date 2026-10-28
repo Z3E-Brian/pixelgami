@@ -1,0 +1,18 @@
+# Apps (.desktop), juegos de Steam, proyectos (VS Code) y ventanas de Hyprland: acciones-mcp/servidor_acciones.py.
+# perfil.yaml: alias_apps, carpetas_proyectos.
+tema: ventanas
+orden: 10
+# si el correo o internet hacen algo con este mensaje, no se interpreta como orden de ventanas ("ábrelo" tras una
+# búsqueda es el resultado; "abre el de la U" es un correo)
+cede_a: [correo, web]
+descripcion: |-
+  abrir, cerrar o mover apps, juegos, proyectos o ventanas de su PC (Discord, VS Code, Steam, {navegador},
+    el explorador, WhatsApp...), o qué ventanas tiene abiertas.
+ejemplos: |-
+  {asistente}: "Listo, te abrí VS Code en el escritorio 9." / {usuario}: "ok, ciérralo" -> orden "cierra VS Code", temas ["ventanas"]
+  {usuario}: "abre discord en la otra pantalla y pon algo de phonk" -> temas ["ventanas", "musica"]
+  {usuario}: "Sierra, el VS Code" -> orden "cierra VS Code", temas ["ventanas"]
+  {usuario}: "Abre también Discord en la pestaña 4" -> orden "abre Discord en el escritorio 4", temas ["ventanas"]
+  {asistente}: "¿En qué escritorio lo abro?" / {usuario}: "en el 3" -> orden "abre la terminal en el escritorio 3" (con lo que
+    venían hablando), temas ["ventanas"]
+si_falla: No pudiste hacerlo con las ventanas ({error}). Díselo en una frase.

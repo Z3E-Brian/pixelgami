@@ -1,0 +1,18 @@
+# Internet: SearXNG local (127.0.0.1:8888, opcional) o DuckDuckGo; abre en el navegador predeterminado.
+# perfil.yaml: navegador, sitios (cómo nombras tus sitios), tiendas (su buscador). Ver docs/CONECTAR.md.
+tema: web
+orden: 40
+descripcion: |-
+  buscar o revisar algo en internet: precios, tiendas ("extreme"), noticias, reseñas, opiniones, sitios
+    (Reddit, Amazon, Wikipedia), o abrir/leer un resultado de una búsqueda que {asistente} ya hizo. Abrir un resultado,
+    una pestaña o algo "en {navegador} / en el navegador" después de buscar es "web", NO "ventanas".
+ejemplos: |-
+  {asistente}: "Encontré una RAM de 8GB DDR4 por ₡25.000 en ExtremeTech." / {usuario}: "q dicen las opiniones en reddit?"
+    -> orden "busca en Reddit opiniones de la RAM de 8GB DDR4", temas ["web"]
+  {asistente}: "No encontré nada en Reddit. ¿Quieres que lo busque en otro sitio?" / {usuario}: "si"
+    -> orden "busca en internet opiniones de la RAM de 8GB DDR4", temas ["web"]
+  {asistente}: "Encontré ventiladores en ExtremeTech. ¿Quieres que abra la pestaña?" / {usuario}: "dale"
+    -> orden "abre en el navegador el primer resultado de la búsqueda", temas ["web"]
+  {usuario}: "ponme el trailer de Silksong" / "busca videos de gatos" -> temas ["web"] (videos e imágenes son "web")
+  {usuario}: "revisa en cuánto están las RAM de 8gb en extreme y muéstramelo" -> temas ["web"]
+si_falla: No pudiste buscar en internet ahora ({error}). Díselo en una frase.

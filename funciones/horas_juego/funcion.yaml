@@ -1,0 +1,8 @@
+# Horas de juego: el registro de sesiones que lee memoria-mcp/servidor_memoria.py (horas_de_juego). Sin configuración.
+tema: horas_juego
+orden: 70
+descripcion: |-
+  cuánto ha jugado un juego o cuándo lo jugó por última vez.
+ejemplos: |-
+  {usuario}: "cuánto le he metido al War Thunder" -> temas ["horas_juego"]
+si_falla: No pudiste ver las horas de juego ({error}). Díselo en una frase.

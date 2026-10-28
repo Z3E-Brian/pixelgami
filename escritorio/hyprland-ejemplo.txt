@@ -1,0 +1,28 @@
+# Atajos y reglas de ventana para Hyprland. Cambia RUTA por la carpeta de instalación
+# (por defecto ~/.local/share/pixelgami). Usa el bloque que corresponda a tu config.
+
+# ---------- hyprland.conf (sintaxis clásica; revisa la de window rules de tu versión) ----------
+bind = SUPER, Z, exec, RUTA/escritorio/asistente_toggle.sh
+bind = SUPER SHIFT, Z, exec, RUTA/escritorio/asistente_reiniciar.sh
+windowrule = float, class:^(open-llm-vtuber)$
+windowrule = size 540 800, class:^(open-llm-vtuber)$
+windowrule = noborder, class:^(open-llm-vtuber)$
+windowrule = noshadow, class:^(open-llm-vtuber)$
+windowrule = noblur, class:^(open-llm-vtuber)$
+windowrule = noanim, class:^(open-llm-vtuber)$
+# recordatorios (opcional, ver docs/CONECTAR.md)
+bind = SUPER ALT, Z, exec, cd RUTA && python3 -m funciones.recordatorios.ventana
+windowrule = float, class:^(io\.github\.asistente\.Recordatorios)$
+windowrule = center, class:^(io\.github\.asistente\.Recordatorios)$
+
+# ---------- hyprland.lua (config en Lua, como el entorno donde se programó) ----------
+hl.bind("SUPER + Z", hl.dsp.exec_cmd("RUTA/escritorio/asistente_toggle.sh"),
+    { description = "Asistente: mostrar/ocultar" })
+hl.bind("SUPER + SHIFT + Z", hl.dsp.exec_cmd("RUTA/escritorio/asistente_reiniciar.sh"),
+    { description = "Asistente: reiniciar (si se queda pegada)" })
+hl.window_rule({ match = { class = "^(open-llm-vtuber)$" }, float = true, size = { 540, 800 } })
+hl.window_rule({ match = { class = "^(open-llm-vtuber)$" }, decorate = false, no_shadow = true, no_blur = true, no_anim = true })
+-- recordatorios (opcional, ver docs/CONECTAR.md)
+hl.bind("SUPER + ALT + Z", hl.dsp.exec_cmd("cd RUTA && python3 -m funciones.recordatorios.ventana"),
+    { description = "Asistente: nuevo recordatorio" })
+hl.window_rule({ match = { class = "^(io\\.github\\.asistente\\.Recordatorios)$" }, float = true, center = true })

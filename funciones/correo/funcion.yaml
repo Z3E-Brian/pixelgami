@@ -1,0 +1,22 @@
+# Correo de Gmail / Google Workspace por IMAP (perfil.yaml -> correo; contraseña de aplicación en
+# ~/.config/pixelgami/gmail.key). Solo acciones reversibles. Ver docs/CONECTAR.md.
+tema: correo
+orden: 20
+descripcion: |-
+  su correo (revisar, leer, marcar leídos, mover, borrar, spam, la bandeja, correos de alguien).
+    "Papelera", "spam", "bandeja", "leídos/no leídos" o un remitente (DigitalOcean, Zoom, la U) = "correo", aunque
+    no diga "correo" ("envía a papelera el de DigitalOcean").
+ejemplos: |-
+  {usuario}: "revisa el spam" -> temas ["correo"]
+  {usuario}: "marca como leídos los de la U" -> orden "marca como leídos los correos de la U", temas ["correo"]
+  {usuario}: "¿me escribió el profe de cálculo?" -> orden "revisa si tengo correos del profe de cálculo", temas ["correo"]
+    (el remitente queda tal cual lo dijo: nunca lo cambies por otro como "la U")
+  {asistente}: "¡Listo, los de Unsplash y Render ya están en la papelera!" / {usuario}: "q dicen los de comunicados uni?"
+    -> orden "lee los correos de Comunicados UNI", temas ["correo"] (es otro remitente: no mezcles los de antes)
+  {asistente}: "Los correos de la U hablan de normativas." / {usuario}: "cuantos leiste?" -> orden "dime cuántos correos
+    leíste", temas ["correo"]
+  {asistente}: "El de GitHub es sobre un proyecto que tienes que entregar." / {usuario}: "jajaja me gustó, pero creo q el
+    correo era otro" -> orden "vuelve a leer el correo de GitHub y dime bien lo que dice", temas ["correo"]
+si_falla: >-
+  No pudiste entrar al correo ahora ({error}); no se cambió nada. Díselo y que lo intente de nuevo en un momento. No
+  cierres ventanas ni uses herramientas por esto.

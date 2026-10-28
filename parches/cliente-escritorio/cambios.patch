@@ -1,0 +1,1147 @@
+diff --git a/src/main/index.ts b/src/main/index.ts
+index e1e1bf6..a49976a 100644
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -3,6 +3,9 @@ import { app, ipcMain, globalShortcut, desktopCapturer } from "electron";
+ import { electronApp, optimizer } from "@electron-toolkit/utils";
+ import { WindowManager } from "./window-manager";
+ import { MenuManager } from "./menu-manager";
++import { seguirCursorHyprland } from "./asistente-cursor";
++import fs from "fs";
++import path from "path";
+ 
+ let windowManager: WindowManager;
+ let menuManager: MenuManager;
+@@ -11,6 +14,10 @@ let isQuitting = false;
+ function setupIPC(): void {
+   ipcMain.handle("get-platform", () => process.platform);
+ 
++  ipcMain.on("asistente-forma", (_event, rects: Electron.Rectangle[]) => {
++    windowManager.setPetShape(rects);
++  });
++
+   ipcMain.on("set-ignore-mouse-events", (_event, ignore: boolean) => {
+     const window = windowManager.getWindow();
+     if (window) {
+@@ -73,6 +80,12 @@ function setupIPC(): void {
+   });
+ }
+ 
++// Asistente: una sola instancia. Si ya hay una abierta (Super+Z repetido mientras arranca),
++// la nueva se cierra sola; asistente_toggle.sh se encarga de mostrar la existente.
++if (!app.requestSingleInstanceLock()) {
++  app.exit(0);
++}
++
+ app.whenReady().then(() => {
+   electronApp.setAppUserModelId("com.electron");
+ 
+@@ -88,10 +101,51 @@ app.whenReady().then(() => {
+   });
+   menuManager.createTray();
+ 
++  // Asistente: arrancar directamente en modo mascota (ASISTENTE_MODE=pet, ver asistente_toggle.sh)
++  if (process.env.ASISTENTE_MODE === "pet") {
++    window.webContents.once("did-finish-load", () => {
++      setTimeout(() => menuManager.setMode("pet"), 1500);
++    });
++  }
++
++  seguirCursorHyprland(window);
++
++  // Asistente: asistente_toggle.sh avisa abriendo una segunda instancia con --asistente-mostrar
++  // o --asistente-ocultar (se cierra sola por el candado de instancia única)
++  const avisar = (visible: boolean) => {
++    if (visible) {
++      window.focus();
++      window.webContents.focus();
++    }
++    window.webContents.send("asistente-visibilidad", visible);
++  };
++  app.on("second-instance", (_event, argv) => {
++    if (argv.includes("--asistente-mostrar")) avisar(true);
++    else if (argv.includes("--asistente-ocultar")) avisar(false);
++  });
++
++  // Asistente: el aviso rápido es un archivo que asistente_toggle.sh escribe ("ocultar <hora>"):
++  // abrir otra instancia tarda 1-3 s, y mientras tanto el micrófono seguía abierto
++  if (process.platform === "linux") {
++    const archivo = path.join(process.env.XDG_RUNTIME_DIR || "/tmp", "asistente_aviso");
++    fs.writeFileSync(archivo, "");
++    let ultimo = "";
++    fs.watch(archivo, () => {
++      const linea = fs.readFileSync(archivo, "utf8").trim();
++      if (!linea || linea === ultimo) return; // fs.watch avisa a veces dos veces
++      ultimo = linea;
++      if (linea.startsWith("mostrar")) avisar(true);
++      else if (linea.startsWith("ocultar")) avisar(false);
++    });
++  }
++
+   window.on("close", (event) => {
+     if (!isQuitting) {
+       event.preventDefault();
+-      window.hide();
++      // Asistente: en modo mascota (Linux) ignorar el "cerrar ventana" del compositor: tras cerrar
++      // otra app el foco pasa a Asistente y un segundo atajo de cerrar la escondía sin querer
++      // (ocultarla es con Super+Z). En modo ventana, como antes: se esconde a la bandeja.
++      if (!(process.platform === "linux" && process.env.ASISTENTE_MODE === "pet")) window.hide();
+     }
+     return false;
+   });
+diff --git a/src/main/window-manager.ts b/src/main/window-manager.ts
+index 3161fee..b695169 100644
+--- a/src/main/window-manager.ts
++++ b/src/main/window-manager.ts
+@@ -5,6 +5,10 @@ import { join } from 'path';
+ import { is } from '@electron-toolkit/utils';
+ 
+ const isMac = process.platform === 'darwin';
++// Asistente: en Linux el modo mascota corre por XWayland y la zona que recibe clics la
++// marca window.setShape (silueta de Asistente + cuadro de texto, ver use-asistente-forma.ts),
++// en vez de alternar setIgnoreMouseEvents al pasar el ratón (no funciona en Linux).
++const isLinux = process.platform === 'linux';
+ 
+ export class WindowManager {
+   private window: BrowserWindow | null = null;
+@@ -154,6 +158,7 @@ export class WindowManager {
+ 
+     this.window.setAlwaysOnTop(false);
+     this.window.setIgnoreMouseEvents(false);
++    if (isLinux) this.window.setShape([]);
+     this.window.setSkipTaskbar(false);
+     this.window.setResizable(true);
+     this.window.setFocusable(true);
+@@ -196,7 +201,8 @@ export class WindowManager {
+     this.window.setBackgroundColor('#00000000');
+ 
+     this.window.setAlwaysOnTop(true, 'screen-saver');
+-    this.window.setPosition(0, 0);
++    // Asistente: en Linux la coloca asistente_toggle.sh (abajo a la derecha); no moverla a 0,0
++    if (!isLinux) this.window.setPosition(0, 0);
+ 
+     this.window.webContents.send('pre-mode-changed', 'pet');
+   }
+@@ -206,29 +212,37 @@ export class WindowManager {
+     // Calculate the bounding rectangle that covers all connected displays.
+     // This allows the transparent pet-mode window to span across monitors,
+     // so the avatar can be dragged freely between them.
+-    const displays = screen.getAllDisplays();
+-    const minX = Math.min(...displays.map((d) => d.bounds.x));
+-    const minY = Math.min(...displays.map((d) => d.bounds.y));
+-    const maxX = Math.max(...displays.map((d) => d.bounds.x + d.bounds.width));
+-    const maxY = Math.max(...displays.map((d) => d.bounds.y + d.bounds.height));
+-    const combinedWidth = maxX - minX;
+-    const combinedHeight = maxY - minY;
+-
+-    // Resize and position the window to cover the entire virtual screen
+-    // so the avatar is not clipped when dragged to a second monitor.
+-    this.window.setBounds({
+-      x: minX,
+-      y: minY,
+-      width: combinedWidth,
+-      height: combinedHeight,
+-    });
++    // Asistente: en Linux/Wayland no se puede dejar pasar el clic por la parte
++    // transparente, así que la ventana conserva su tamaño (lo fija Hyprland)
++    // en vez de cubrir todas las pantallas.
++    if (isMac || process.platform === "win32") {
++      const displays = screen.getAllDisplays();
++      const minX = Math.min(...displays.map((d) => d.bounds.x));
++      const minY = Math.min(...displays.map((d) => d.bounds.y));
++      const maxX = Math.max(...displays.map((d) => d.bounds.x + d.bounds.width));
++      const maxY = Math.max(...displays.map((d) => d.bounds.y + d.bounds.height));
++      const combinedWidth = maxX - minX;
++      const combinedHeight = maxY - minY;
++
++      // Resize and position the window to cover the entire virtual screen
++      // so the avatar is not clipped when dragged to a second monitor.
++      this.window.setBounds({
++        x: minX,
++        y: minY,
++        width: combinedWidth,
++        height: combinedHeight,
++      });
++
++    }
+ 
+     if (isMac) this.window.setWindowButtonVisibility(false);
+     this.window.setResizable(false);
+     this.window.setSkipTaskbar(true);
+-    this.window.setFocusable(false);
++    this.window.setFocusable(isLinux);
+ 
+-    if (isMac) {
++    if (isLinux) {
++      this.window.setIgnoreMouseEvents(false);
++    } else if (isMac) {
+       this.window.setIgnoreMouseEvents(true);
+       this.window.setVisibleOnAllWorkspaces(true, {
+         visibleOnFullScreen: true,
+@@ -245,7 +259,7 @@ export class WindowManager {
+   }
+ 
+   setIgnoreMouseEvents(ignore: boolean): void {
+-    if (!this.window) return;
++    if (!this.window || (isLinux && this.currentMode === 'pet')) return;
+ 
+     if (isMac) {
+       this.window.setIgnoreMouseEvents(ignore);
+@@ -282,7 +296,7 @@ export class WindowManager {
+   }
+ 
+   updateComponentHover(componentId: string, isHovering: boolean): void {
+-    if (this.currentMode === 'window') return;
++    if (this.currentMode === 'window' || isLinux) return;
+ 
+     // If force ignore is enabled, don't change the mouse ignore state
+     if (this.forceIgnoreMouse) return;
+@@ -306,6 +320,13 @@ export class WindowManager {
+     }
+   }
+ 
++  // Asistente: zona del modo mascota que recibe clics (lista vacía = toda la ventana,
++  // así que se deja un punto mínimo en la esquina)
++  setPetShape(rects: Electron.Rectangle[]): void {
++    if (!this.window || !isLinux || this.currentMode !== 'pet') return;
++    this.window.setShape(rects.length ? rects : [{ x: 0, y: 0, width: 1, height: 1 }]);
++  }
++
+   // Toggle force ignore mouse events
+   toggleForceIgnoreMouse(): void {
+     this.forceIgnoreMouse = !this.forceIgnoreMouse;
+diff --git a/src/preload/index.d.ts b/src/preload/index.d.ts
+index c227dbb..6a1fb51 100644
+--- a/src/preload/index.d.ts
++++ b/src/preload/index.d.ts
+@@ -13,6 +13,9 @@ declare global {
+       onInterrupt: (callback: () => void) => void
+       updateComponentHover: (componentId: string, isHovering: boolean) => void
+       onToggleInputSubtitle: (callback: () => void) => void
++      onAsistenteVisibility: (callback: (visible: boolean) => void) => () => void
++      onAsistenteCursor: (callback: (pos: { x: number, y: number }) => void) => () => void
++      setAsistenteShape: (rects: { x: number, y: number, width: number, height: number }[]) => void
+       onToggleScrollToResize: (callback: () => void) => void
+       onSwitchCharacter: (callback: (filename: string) => void) => void
+       setMode: (mode: 'window' | 'pet') => void
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index f4c5dc8..6fdcd1e 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -49,6 +49,22 @@ const api = {
+     ipcRenderer.on('toggle-input-subtitle', handler);
+     return () => ipcRenderer.removeListener('toggle-input-subtitle', handler);
+   },
++  // Asistente: posición del cursor relativa a la ventana, en toda la pantalla (asistente-cursor.ts)
++  onAsistenteCursor: (callback: (pos: { x: number, y: number }) => void) => {
++    const handler = (_event: any, pos: { x: number, y: number }) => callback(pos);
++    ipcRenderer.on('asistente-cursor', handler);
++    return () => ipcRenderer.removeListener('asistente-cursor', handler);
++  },
++  // Asistente: zona de la ventana mascota que recibe clics (ver use-asistente-forma.ts)
++  setAsistenteShape: (rects: { x: number, y: number, width: number, height: number }[]) => {
++    ipcRenderer.send('asistente-forma', rects);
++  },
++  // Asistente: asistente_toggle.sh avisa cuando la muestra (true) o la oculta (false)
++  onAsistenteVisibility: (callback: (visible: boolean) => void) => {
++    const handler = (_event: any, visible: boolean) => callback(visible);
++    ipcRenderer.on('asistente-visibilidad', handler);
++    return () => ipcRenderer.removeListener('asistente-visibilidad', handler);
++  },
+   onToggleScrollToResize: (callback: () => void) => {
+     const handler = (_event: any) => callback();
+     ipcRenderer.on('toggle-scroll-to-resize', handler);
+diff --git a/src/renderer/WebSDK/src/lapplive2dmanager.ts b/src/renderer/WebSDK/src/lapplive2dmanager.ts
+index 8de1ff8..988132c 100644
+--- a/src/renderer/WebSDK/src/lapplive2dmanager.ts
++++ b/src/renderer/WebSDK/src/lapplive2dmanager.ts
+@@ -153,7 +153,9 @@ export class LAppLive2DManager {
+       if (model.getModel()) {
+         if (model.getModel().getCanvasWidth() > 1.0 && width < height) {
+           // 横に長いモデルを縦長ウィンドウに表示する際モデルの横サイズでscaleを算出する
+-          model.getModelMatrix().setWidth(2.0);
++          // Asistente: un poco menos que el ancho de la ventana, para que las coletas (que
++          // sobresalen del lienzo del modelo) no se corten por los lados
++          model.getModelMatrix().setWidth(1.9);
+           projection.scale(1.0, width / height);
+         } else {
+           projection.scale(height / width, 1.0);
+diff --git a/src/renderer/WebSDK/src/lappmodel.ts b/src/renderer/WebSDK/src/lappmodel.ts
+index 00ab2c2..f0fdff1 100644
+--- a/src/renderer/WebSDK/src/lappmodel.ts
++++ b/src/renderer/WebSDK/src/lappmodel.ts
+@@ -416,6 +416,19 @@ export class LAppModel extends CubismUserModel {
+ 
+       this._modelSetting.getLayoutMap(layout);
+       this._modelMatrix.setupFromLayout(layout);
++      // Asistente: si el usuario la arrastró en modo mascota, usar esa posición
++      try {
++        const guardada = localStorage.getItem(`asistentePos:${this._modelHomeDir}`);
++        if (guardada) {
++          const { x, y } = JSON.parse(guardada);
++          const m = [...this._modelMatrix.getArray()];
++          m[12] = x;
++          m[13] = y;
++          this._modelMatrix.setMatrix(m as any);
++        }
++      } catch (error) {
++        console.warn('Posición guardada de Asistente no válida:', error);
++      }
+       this._state = LoadStep.LoadMotion;
+ 
+       // callback
+@@ -612,20 +625,22 @@ export class LAppModel extends CubismUserModel {
+     }
+ 
+     // Lip sync settings
++    // Asistente: antes se sumaba el volumen x4 a la boca (abría al máximo con cualquier
++    // sonido). Ahora la apertura y la forma salen de la vocal detectada en el audio;
++    // la forma se suma a la de la expresión (sonrisa, puchero) en vez de pisarla.
+     if (this._lipsync) {
+-      let value = 0.0;
+       this._wavFileHandler.update(deltaTimeSeconds);
+-      value = this._wavFileHandler.getRms();
+-      value = Math.min(1.0, value * 1.5);
+-
+-      const lipSyncWeight = 4.0;
+-
+-      for (let i = 0; i < this._lipSyncIds.getSize(); ++i) {
+-        this._model.addParameterValueById(
+-          this._lipSyncIds.at(i),
+-          value,
+-          lipSyncWeight
+-        );
++      if (this._wavFileHandler.isPlaying()) {
++        const open = this._wavFileHandler.getMouthOpen();
++        for (let i = 0; i < this._lipSyncIds.getSize(); ++i) {
++          this._model.setParameterValueById(this._lipSyncIds.at(i), open);
++        }
++        if (this._idParamMouthForm) {
++          this._model.addParameterValueById(
++            this._idParamMouthForm,
++            this._wavFileHandler.getMouthForm() * 0.8
++          );
++        }
+       }
+     }
+ 
+@@ -795,6 +810,7 @@ export class LAppModel extends CubismUserModel {
+     }
+ 
+     if (motion != null) {
++      this._currentExpression = expressionId; // Asistente: para volver a ella tras un toque
+       this._expressionManager.startMotionPriority(
+         motion,
+         false,
+@@ -1026,6 +1042,8 @@ export class LAppModel extends CubismUserModel {
+     // 各読み込み終了後
+     if (this._state == LoadStep.CompleteSetup) {
+       matrix.multiplyByMatrix(this._modelMatrix);
++      // Asistente: matriz final guardada para calcular la silueta en pantalla (use-asistente-forma.ts)
++      this._mvpArray = Float32Array.from(matrix.getArray());
+ 
+       this.getRenderer().setMvpMatrix(matrix);
+ 
+@@ -1292,6 +1310,9 @@ export class LAppModel extends CubismUserModel {
+       this._idParamBodyAngleX = idManager.getId(
+         CubismDefaultParameterId.ParamBodyAngleX
+       );
++      this._idParamMouthForm = idManager.getId(
++        CubismDefaultParameterId.ParamMouthForm
++      );
+     } else {
+       // Initialize handles with null to avoid undefined errors
+       this._idParamAngleX = null;
+@@ -1300,6 +1321,7 @@ export class LAppModel extends CubismUserModel {
+       this._idParamEyeBallX = null;
+       this._idParamEyeBallY = null;
+       this._idParamBodyAngleX = null;
++      this._idParamMouthForm = null;
+     }
+ 
+     if (LAppDefine.MOCConsistencyValidationEnable) {
+@@ -1334,6 +1356,9 @@ export class LAppModel extends CubismUserModel {
+   _idParamEyeBallX: CubismIdHandle; // パラメータID: ParamEyeBallX
+   _idParamEyeBallY: CubismIdHandle; // パラメータID: ParamEyeBAllY
+   _idParamBodyAngleX: CubismIdHandle; // パラメータID: ParamBodyAngleX
++  _idParamMouthForm: CubismIdHandle; // Asistente: forma de boca para las vocales
++  _mvpArray: Float32Array | null = null; // Asistente: última matriz de dibujo
++  _currentExpression: string | null = null; // Asistente: última expresión puesta
+ 
+   _state: LoadStep; // 現在のステータス管理用
+   _expressionCount: number; // 表情データカウント
+diff --git a/src/renderer/WebSDK/src/lappwavfilehandler.ts b/src/renderer/WebSDK/src/lappwavfilehandler.ts
+index c68c155..8d6b69e 100644
+--- a/src/renderer/WebSDK/src/lappwavfilehandler.ts
++++ b/src/renderer/WebSDK/src/lappwavfilehandler.ts
+@@ -84,9 +84,76 @@ export class LAppWavFileHandler {
+ 
+     this._lastRms = rms;
+     this._sampleOffset = goalOffset;
++    this.updateVowel(deltaTimeSeconds);
+     return true;
+   }
+ 
++  /**
++   * Asistente: apertura y forma de boca según la vocal (no solo el volumen).
++   * Espectro de los últimos ~25 ms en tres bandas: graves (200-650 Hz),
++   * medios (650-2200 Hz) y agudos (2200-5000 Hz). Calibrado con la voz RVC:
++   * A = casi todo en medios (boca muy abierta); E/I = agudos fuertes (boca
++   * estirada, I casi cerrada); O/U = sin agudos (boca redonda, U más cerrada).
++   */
++  private updateVowel(deltaTimeSeconds: number): void {
++    const N = 1024;
++    const fs = this._wavFileInfo._samplingRate;
++    const pcm = this._pcmData[0];
++    let open = 0.0;
++    let form = 0.0;
++    if (this._sampleOffset >= N) {
++      if (!this._fftRe) {
++        this._fftRe = new Float32Array(N);
++        this._fftIm = new Float32Array(N);
++        this._fftWin = new Float32Array(N);
++        for (let i = 0; i < N; i++) {
++          this._fftWin[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
++        }
++      }
++      const re = this._fftRe;
++      const im = this._fftIm;
++      const start = this._sampleOffset - N;
++      let rms = 0.0;
++      for (let i = 0; i < N; i++) {
++        const v = pcm[start + i];
++        re[i] = v * this._fftWin[i];
++        im[i] = 0.0;
++        if (i >= N / 3) rms += v * v;
++      }
++      rms = Math.sqrt(rms / (N - Math.ceil(N / 3)));
++      fft(re, im);
++      const binHz = fs / N;
++      const band = (a: number, b: number): number => {
++        let e = 1e-12;
++        const hi = Math.min(N / 2, Math.ceil(b / binHz));
++        for (let k = Math.floor(a / binHz); k < hi; k++) {
++          e += re[k] * re[k] + im[k] * im[k];
++        }
++        return e;
++      };
++      const L = band(200, 650);
++      const M = band(650, 2200);
++      const H = band(2200, 5000);
++      const medios = M / (L + M + H);
++      const agudosDb = 10 * Math.log10(H / (L + M));
++      const clamp = (v: number): number => Math.min(1, Math.max(0, v));
++
++      const volumen = Math.pow(clamp((rms - 0.02) / 0.2), 0.7);
++      const estirada = clamp((agudosDb + 28) / 12) * clamp((0.85 - medios) / 0.3);
++      // umbral algo permisivo: en frases seguidas la O/U arrastra agudos de las consonantes
++      const redonda =
++        (1 - clamp((agudosDb + 23) / 8)) * clamp((0.8 - medios) / 0.35);
++      open = volumen * (0.3 + 0.7 * clamp(medios / 0.85));
++      form = volumen > 0 ? estirada - redonda : 0.0;
++    }
++    // suavizado: abre rápido, cierra un poco más lento (independiente de los fps)
++    const tau = open > this._mouthOpen ? 0.025 : 0.06;
++    this._mouthOpen += (open - this._mouthOpen) * (1 - Math.exp(-deltaTimeSeconds / tau));
++    // la forma se marca rápido y se suelta algo más lento, para que la O/U alcance a verse
++    const tauForma = Math.abs(form) > Math.abs(this._mouthForm) ? 0.05 : 0.09;
++    this._mouthForm += (form - this._mouthForm) * (1 - Math.exp(-deltaTimeSeconds / tauForma));
++  }
++
+   public start(filePath: string): void {
+     // サンプル位参照位置を初期化
+     this._sampleOffset = 0;
+@@ -94,6 +161,8 @@ export class LAppWavFileHandler {
+ 
+     // RMS値をリセット
+     this._lastRms = 0.0;
++    this._mouthOpen = 0.0;
++    this._mouthForm = 0.0;
+ 
+     this.loadWavFile(filePath);
+   }
+@@ -102,6 +171,24 @@ export class LAppWavFileHandler {
+     return this._lastRms;
+   }
+ 
++  /** Asistente: apertura de boca 0..1 según volumen y vocal (0 si no habla) */
++  public getMouthOpen(): number {
++    return this.isPlaying() ? this._mouthOpen : 0.0;
++  }
++
++  /** Asistente: forma de boca -1 (O/U, redonda) .. +1 (E/I, estirada) */
++  public getMouthForm(): number {
++    return this.isPlaying() ? this._mouthForm : 0.0;
++  }
++
++  /** Asistente: hay audio cargado y sin terminar */
++  public isPlaying(): boolean {
++    return (
++      this._pcmData != null &&
++      this._sampleOffset < this._wavFileInfo._samplesPerChannel
++    );
++  }
++
+   public loadWavFile(filePath: string): Promise<boolean> {
+     return new Promise((resolveValue) => {
+       let ret = false;
+@@ -309,6 +396,8 @@ export class LAppWavFileHandler {
+     this._userTimeSeconds = 0.0;
+     this._lastRms = 0.0;
+     this._sampleOffset = 0.0;
++    this._mouthOpen = 0.0;
++    this._mouthForm = 0.0;
+     this._wavFileInfo = new WavFileInfo();
+     this._byteReader = new ByteReader();
+   }
+@@ -317,6 +406,11 @@ export class LAppWavFileHandler {
+   _userTimeSeconds: number;
+   _lastRms: number;
+   _sampleOffset: number;
++  _mouthOpen: number;
++  _mouthForm: number;
++  _fftRe: Float32Array | null = null;
++  _fftIm: Float32Array | null = null;
++  _fftWin: Float32Array | null = null;
+   _wavFileInfo: WavFileInfo;
+   _byteReader: ByteReader;
+   _loadFiletoBytes = (arrayBuffer: ArrayBuffer, length: number): void => {
+@@ -326,6 +420,42 @@ export class LAppWavFileHandler {
+   };
+ }
+ 
++/** Asistente: FFT radix-2 en el lugar (re/im de largo potencia de 2) */
++function fft(re: Float32Array, im: Float32Array): void {
++  const n = re.length;
++  for (let i = 1, j = 0; i < n; i++) {
++    let bit = n >> 1;
++    for (; j & bit; bit >>= 1) j ^= bit;
++    j ^= bit;
++    if (i < j) {
++      [re[i], re[j]] = [re[j], re[i]];
++      [im[i], im[j]] = [im[j], im[i]];
++    }
++  }
++  for (let len = 2; len <= n; len <<= 1) {
++    const ang = (-2 * Math.PI) / len;
++    const wr = Math.cos(ang);
++    const wi = Math.sin(ang);
++    for (let i = 0; i < n; i += len) {
++      let cr = 1.0;
++      let ci = 0.0;
++      for (let k = 0; k < len / 2; k++) {
++        const a = i + k;
++        const b = a + len / 2;
++        const tr = re[b] * cr - im[b] * ci;
++        const ti = re[b] * ci + im[b] * cr;
++        re[b] = re[a] - tr;
++        im[b] = im[a] - ti;
++        re[a] += tr;
++        im[a] += ti;
++        const t = cr * wr - ci * wi;
++        ci = cr * wi + ci * wr;
++        cr = t;
++      }
++    }
++  }
++}
++
+ export class WavFileInfo {
+   constructor() {
+     this._fileName = "";
+diff --git a/src/renderer/src/components/canvas/live2d.tsx b/src/renderer/src/components/canvas/live2d.tsx
+index 8e60caa..274a28a 100644
+--- a/src/renderer/src/components/canvas/live2d.tsx
++++ b/src/renderer/src/components/canvas/live2d.tsx
+@@ -12,6 +12,7 @@ import { useAiState, AiStateEnum } from "@/context/ai-state-context";
+ import { useLive2DExpression } from "@/hooks/canvas/use-live2d-expression";
+ import { useForceIgnoreMouse } from "@/hooks/utils/use-force-ignore-mouse";
+ import { useMode } from "@/context/mode-context";
++import { audioManager } from "@/utils/audio-manager";
+ 
+ interface Live2DProps {
+   showSidebar?: boolean;
+@@ -46,13 +47,21 @@ export const Live2D = memo(
+     useAudioTask();
+ 
+     // Reset expression to default when AI state becomes idle
++    // Asistente: volver a la cara normal cuando de verdad terminó de sonar la última frase (el estado "idle" a
++    // veces llega mientras todavía suena) y tras 4 s, para que el ánimo se note al terminar
+     useEffect(() => {
+-      if (aiState === AiStateEnum.IDLE) {
++      if (aiState !== AiStateEnum.IDLE) return undefined;
++      let silencio = 0;
++      const timer = setInterval(() => {
++        silencio = audioManager.hasCurrentAudio() ? 0 : silencio + 250;
++        if (silencio < 4000) return;
++        clearInterval(timer);
+         const lappAdapter = (window as any).getLAppAdapter?.();
+         if (lappAdapter) {
+           resetExpression(lappAdapter, modelInfo);
+         }
+-      }
++      }, 250);
++      return () => clearInterval(timer);
+     }, [aiState, modelInfo, resetExpression]);
+ 
+     // Expose setExpression for console testing
+diff --git a/src/renderer/src/components/electron/electron-style.tsx b/src/renderer/src/components/electron/electron-style.tsx
+index 05332c5..8d7b59a 100644
+--- a/src/renderer/src/components/electron/electron-style.tsx
++++ b/src/renderer/src/components/electron/electron-style.tsx
+@@ -3,12 +3,15 @@ import { SystemStyleObject } from '@chakra-ui/react';
+ export const inputSubtitleStyles = {
+   container: {
+     display: 'flex',
+-    alignItems: 'flex-end',
++    flexDirection: 'column' as const,
++    alignItems: 'stretch',
+     justifyContent: 'center',
+     maxW: 'fit-content',
+     position: 'absolute' as const,
+-    bottom: '120px',
+-    left: '50%',
++    // Asistente: arriba a la izquierda, sobre su cabeza (left = margen + mitad del ancho,
++    // porque el arrastre conserva el translateX(-50%))
++    bottom: '350px',
++    left: '178px',
+     transform: 'translateX(-50%)',
+     zIndex: 1000,
+     userSelect: 'none',
+@@ -16,64 +19,93 @@ export const inputSubtitleStyles = {
+     padding: 0,
+   },
+ 
++  // Asistente: burbuja de diálogo con sus colores (turquesa #39C5BB, rosa de las coletas #E12885)
+   box: {
+-    w: '400px',
+-    rounded: 'xl',
++    w: '340px',
++    position: 'relative' as const,
++    rounded: '22px',
+     overflow: 'hidden',
+-    boxShadow: 'lg',
+-    bg: 'blackAlpha.700',
+-    backdropFilter: 'blur(8px)',
++    bg: 'rgba(255, 255, 255, 0.93)',
++    border: '2px solid #39C5BB',
++    boxShadow: '0 6px 22px rgba(57, 197, 187, 0.35)',
+     css: { WebkitUserSelect: 'none' },
+   },
+ 
++  // la colita de la burbuja, apuntando hacia Asistente (abajo a la derecha); va dentro del
++  // contenedor para que la forma de la ventana (useAsistenteForma) no la recorte
++  tail: {
++    alignSelf: 'flex-end',
++    mr: '64px',
++    mt: '-11px',
++    w: '20px',
++    h: '20px',
++    bg: 'rgba(255, 255, 255, 0.93)',
++    borderRight: '2px solid #39C5BB',
++    borderBottom: '2px solid #39C5BB',
++    transform: 'rotate(45deg)',
++    borderBottomRightRadius: '4px',
++  },
++
++  nameTag: {
++    fontSize: '11px',
++    fontWeight: 'bold',
++    letterSpacing: '0.06em',
++    color: '#2BA89F',
++  },
++
+   messageStack: {
+-    p: '3',
+-    gap: 1,
++    pl: '4',
++    pr: '7',
++    pt: '3',
++    pb: '2',
++    gap: 0.5,
+     alignItems: 'stretch',
+     justify: 'flex-end',
+   },
+ 
+   messageText: {
+-    color: 'white',
++    color: '#1F3B3D',
+     fontSize: 'sm',
++    fontWeight: '500',
+     lineHeight: '1.5',
+     transition: 'all 0.3s',
+   },
+ 
+   statusBox: {
+-    bg: 'blackAlpha.600',
+-    p: '3',
+-    borderTop: '1px',
+-    borderColor: 'whiteAlpha.200',
++    pl: '4',
++    pr: '8', // espacio para la X de cerrar
++    py: '1.5',
++    borderTop: '1px dashed rgba(57, 197, 187, 0.45)',
+   },
+ 
+   statusText: {
+     fontSize: 'xs',
+-    color: 'whiteAlpha.800',
++    color: '#2BA89F',
+     transition: 'all 0.3s',
+   },
+ 
+   iconButton: {
+     size: 'xs',
+     variant: 'ghost',
+-    color: 'whiteAlpha.800',
+-    _hover: { bg: 'whiteAlpha.200' },
++    rounded: 'full',
++    color: '#2BA89F',
++    _hover: { bg: 'rgba(57, 197, 187, 0.15)' },
+   },
+ 
+   inputBox: {
+-    bg: 'blackAlpha.600',
+-    borderTop: '1px',
+-    borderColor: 'whiteAlpha.200',
++    bg: 'rgba(57, 197, 187, 0.08)',
+   },
+ 
+   input: {
+     size: 'sm',
+-    bg: 'blackAlpha.500',
+-    color: 'white',
+-    _placeholder: { color: 'whiteAlpha.500' },
+-    borderColor: 'whiteAlpha.300',
++    rounded: 'full',
++    bg: 'white',
++    color: '#1F3B3D',
++    _placeholder: { color: '#86BFBA' },
++    borderColor: '#A8E4DE',
+     _focus: {
+-      borderColor: 'whiteAlpha.500',
++      borderColor: '#39C5BB',
++      boxShadow: '0 0 0 2px rgba(57, 197, 187, 0.25)',
+       outline: 'none',
+     },
+     flex: '1',
+@@ -81,11 +113,11 @@ export const inputSubtitleStyles = {
+ 
+   sendButton: {
+     p: '1.5',
+-    bg: 'blackAlpha.500',
+-    rounded: 'lg',
+-    _hover: { bg: 'blackAlpha.600' },
++    bg: '#39C5BB',
++    rounded: 'full',
++    _hover: { bg: '#2BA89F' },
+     transition: 'colors',
+-    color: 'whiteAlpha.800',
++    color: 'white',
+     size: 'sm',
+   },
+ 
+@@ -97,18 +129,19 @@ export const inputSubtitleStyles = {
+ 
+   closeButton: {
+     position: 'absolute' as const,
+-    top: 0,
+-    right: 0,
+     size: '2xs',
+     minW: '6',
+     height: '6',
+     padding: 0,
+     variant: 'ghost',
+-    color: 'whiteAlpha.400',
++    top: '4px',
++    right: '6px',
++    rounded: 'full',
++    color: '#86BFBA',
+     bg: 'transparent',
+     _hover: {
+-      bg: 'blackAlpha.300',
+-      color: 'whiteAlpha.800',
++      bg: 'rgba(225, 40, 133, 0.12)',
++      color: '#E12885',
+     },
+     zIndex: 10,
+   },
+diff --git a/src/renderer/src/components/electron/input-subtitle.tsx b/src/renderer/src/components/electron/input-subtitle.tsx
+index 52e0fbe..ee029cc 100644
+--- a/src/renderer/src/components/electron/input-subtitle.tsx
++++ b/src/renderer/src/components/electron/input-subtitle.tsx
+@@ -11,11 +11,25 @@ import {
+   VStack,
+   IconButton,
+ } from '@chakra-ui/react';
+-import { useState, useEffect, useCallback } from 'react';
++import { useState, useEffect, useCallback, useRef } from 'react';
+ import { useInputSubtitle } from '@/hooks/electron/use-input-subtitle';
+ import { useDraggable } from '@/hooks/electron/use-draggable';
+ import { inputSubtitleStyles } from './electron-style';
+ import { useMode } from '@/context/mode-context';
++import { useVAD } from '@/context/vad-context';
++import { useInterrupt } from '@/hooks/utils/use-interrupt';
++import { useAsistenteForma } from '@/hooks/electron/use-asistente-forma';
++import { useAsistenteMirada } from '@/hooks/electron/use-asistente-mirada';
++
++// Asistente: el estado del asistente dicho como lo diría ella
++const ESTADOS: Record<string, string> = {
++  idle: 'aquí estoy ♪',
++  listening: 'te escucho…',
++  'thinking-speaking': 'pensando…',
++  interrupted: 'me callo',
++  loading: 'cargando…',
++  waiting: 'un momento…',
++};
+ 
+ export function InputSubtitle() {
+   const {
+@@ -47,6 +61,11 @@ export function InputSubtitle() {
+   });
+ 
+   const [isVisible, setIsVisible] = useState(true);
++  const inputRef = useRef<HTMLInputElement>(null);
++  const { startMic, stopMic } = useVAD();
++  const { interrupt } = useInterrupt();
++  useAsistenteForma(elementRef, isVisible && isPet);
++  useAsistenteMirada(isPet);
+ 
+   const handleClose = useCallback(() => {
+     if (isPet) {
+@@ -73,6 +92,22 @@ export function InputSubtitle() {
+     return () => {};
+   }, [handleClose, isPet, isVisible]);
+ 
++  // Asistente: al mostrarla (Super+Z) se puede escribir de inmediato y el micrófono se
++  // enciende; al ocultarla deja de escuchar y se calla.
++  useEffect(() => {
++    const cleanup = (window.api as any)?.onAsistenteVisibility?.((visible: boolean) => {
++      if (visible) {
++        setIsVisible(true);
++        setTimeout(() => inputRef.current?.focus(), 50);
++        if (!micOn) startMic();
++      } else {
++        if (micOn) stopMic();
++        if (aiState === 'thinking-speaking' || aiState === 'listening') interrupt();
++      }
++    });
++    return () => cleanup?.();
++  }, [micOn, aiState, startMic, stopMic, interrupt]);
++
+   useEffect(() => {
+     (window as any).inputSubtitle = {
+       open: handleOpen,
+@@ -109,6 +144,10 @@ export function InputSubtitle() {
+             minH={lastAIMessage ? '32px' : '0px'}
+             {...inputSubtitleStyles.messageStack}
+           >
++            <Flex align="center" gap="1.5">
++              <Box w="7px" h="7px" rounded="full" bg="#E12885" />
++              <Text {...inputSubtitleStyles.nameTag}>ASISTENTE</Text>
++            </Flex>
+             {lastAIMessage && (
+               <Text {...inputSubtitleStyles.messageText}>
+                 {lastAIMessage}
+@@ -118,11 +157,11 @@ export function InputSubtitle() {
+         )}
+ 
+         <Box {...inputSubtitleStyles.statusBox}>
+-          <Flex align="center" justify="space-between" color="whiteAlpha.700">
++          <Flex align="center" justify="space-between" color="#2BA89F">
+             <Flex align="center" gap="2">
+               <LuBell size={16} />
+               <Text {...inputSubtitleStyles.statusText}>
+-                {aiState}
++                {ESTADOS[aiState] ?? aiState}
+               </Text>
+             </Flex>
+ 
+@@ -148,12 +187,13 @@ export function InputSubtitle() {
+         <Box {...inputSubtitleStyles.inputBox}>
+           <Stack direction="row" gap="2" p="2">
+             <Input
++              ref={inputRef}
+               value={inputValue}
+               onChange={handleInputChange}
+               onKeyDown={handleKeyPress}
+               onCompositionStart={handleCompositionStart}
+               onCompositionEnd={handleCompositionEnd}
+-              placeholder="Type your message..."
++              placeholder="Escríbele a Asistente…"
+               {...inputSubtitleStyles.input}
+             />
+             <Button
+@@ -165,6 +205,7 @@ export function InputSubtitle() {
+           </Stack>
+         </Box>
+       </Box>
++      <Box {...inputSubtitleStyles.tail} />
+     </Box>
+   );
+ }
+diff --git a/src/renderer/src/context/live2d-config-context.tsx b/src/renderer/src/context/live2d-config-context.tsx
+index c5497ac..89333e8 100644
+--- a/src/renderer/src/context/live2d-config-context.tsx
++++ b/src/renderer/src/context/live2d-config-context.tsx
+@@ -3,6 +3,7 @@ import {
+ } from 'react';
+ import { useLocalStorage } from '@/hooks/utils/use-local-storage';
+ import { useConfig } from '@/context/character-config-context';
++import { configurarCabeza } from '@/utils/asistente-cabeza';
+ 
+ /**
+  * Model emotion mapping interface
+@@ -69,6 +70,10 @@ export interface ModelInfo {
+   /** Enable scroll to resize */
+   scrollToResize?: boolean;
+ 
++  /** Asistente: partes de la cabeza y expresiones al tocarla (utils/asistente-cabeza.ts) */
++  partesCabeza?: string[];
++  toques?: { cabeza?: string; mejilla?: string; caricia?: string };
++
+   /** Initial scale */
+   initialScale?: number;
+ }
+@@ -125,6 +130,7 @@ export function Live2DConfigProvider({ children }: { children: React.ReactNode }
+       return;
+     }
+ 
++    configurarCabeza(info.partesCabeza, info.toques);
+     // Always use the scale defined in the incoming info object (from config)
+     const finalScale = Number(info.kScale || 0.5) * 2;
+     console.log("Setting model info with default scale:", finalScale);
+diff --git a/src/renderer/src/hooks/canvas/use-live2d-expression.ts b/src/renderer/src/hooks/canvas/use-live2d-expression.ts
+index 29c47ca..491fcc5 100644
+--- a/src/renderer/src/hooks/canvas/use-live2d-expression.ts
++++ b/src/renderer/src/hooks/canvas/use-live2d-expression.ts
+@@ -1,5 +1,6 @@
+ import { useCallback } from 'react';
+ import { ModelInfo } from '@/context/live2d-config-context';
++import { retenerExpresion } from '@/utils/asistente-cabeza';
+ 
+ /**
+  * Custom hook for handling Live2D model expressions
+@@ -17,6 +18,12 @@ export const useLive2DExpression = () => {
+     logMessage?: string,
+   ) => {
+     try {
++      // Asistente: no cortar una caricia o un toque; se aplica al terminar
++      const nombre = typeof expressionValue === 'number'
++        ? lappAdapter.getExpressionName(expressionValue)
++        : expressionValue;
++      if (retenerExpresion(nombre)) return;
++
+       if (typeof expressionValue === 'string') {
+         // Set expression by name
+         lappAdapter.setExpression(expressionValue);
+diff --git a/src/renderer/src/hooks/canvas/use-live2d-model.ts b/src/renderer/src/hooks/canvas/use-live2d-model.ts
+index f2cf2d3..8ef5cbe 100644
+--- a/src/renderer/src/hooks/canvas/use-live2d-model.ts
++++ b/src/renderer/src/hooks/canvas/use-live2d-model.ts
+@@ -10,6 +10,7 @@ import { updateModelConfig } from '../../../WebSDK/src/lappdefine';
+ import { LAppDelegate } from '../../../WebSDK/src/lappdelegate';
+ import { initializeLive2D } from '@cubismsdksamples/main';
+ import { useMode } from '@/context/mode-context';
++import { zonaToque, reaccionarToque, caricia, Zona } from '@/utils/asistente-cabeza';
+ 
+ interface UseLive2DModelProps {
+   modelInfo: ModelInfo | undefined;
+@@ -107,6 +108,11 @@ export const useLive2DModel = ({
+   const mouseDownTimeRef = useRef<number>(0);
+   const mouseDownPosRef = useRef<Position>({ x: 0, y: 0 }); // Screen coords at mousedown
+   const isPotentialTapRef = useRef<boolean>(false); // Flag for ongoing potential tap/drag action
++  const dragConCtrlRef = useRef<boolean>(false); // Asistente: el arrastre empezó con Ctrl
++  // Asistente: zona tocada al presionar y recorrido horizontal (para detectar una caricia)
++  const toqueRef = useRef<{ zona: Zona, recorrido: number, ultimoX: number }>({ zona: null, recorrido: 0, ultimoX: 0 });
++  const sostenerRef = useRef<ReturnType<typeof setTimeout>>(); // Asistente: clic sostenido en la cabeza
++  const CARICIA_SOSTENIDA_MS = 400;
+   // ---
+ 
+   useEffect(() => {
+@@ -226,11 +232,24 @@ export const useLive2DModel = ({
+     const isHitOnModel = model.isHitOnModel(modelX, modelY);
+     // --- End Check ---
+ 
+-    if (hitAreaName !== null || isHitOnModel) {
++    // Asistente: en modo mascota también vale un clic en una zona de la cara (isHitOnModel
++    // falla en lo alto del pelo con esta proporción de ventana; los clics fuera de la
++    // silueta ya no llegan, ver use-asistente-forma.ts)
++    const zona = isPet ? zonaToque(x, y) : null;
++    if (hitAreaName !== null || isHitOnModel || zona) {
+       // Record potential tap/drag start
+       mouseDownTimeRef.current = Date.now();
+       mouseDownPosRef.current = { x: e.clientX, y: e.clientY }; // Use clientX/Y for distance check
+       isPotentialTapRef.current = true;
++      // Asistente: en modo mascota solo se arrastra con Ctrl; sin Ctrl el clic es un toque
++      dragConCtrlRef.current = e.ctrlKey;
++      toqueRef.current = { zona, recorrido: 0, ultimoX: e.clientX };
++      clearTimeout(sostenerRef.current);
++      if (isPet && zona === 'cabeza' && !e.ctrlKey) {
++        sostenerRef.current = setTimeout(() => {
++          if (isPotentialTapRef.current && !caricia.activa) caricia.empezar();
++        }, CARICIA_SOSTENIDA_MS);
++      }
+       setIsDragging(false); // Ensure dragging is false initially
+ 
+       // Store initial model position IF drag starts later
+@@ -239,15 +258,26 @@ export const useLive2DModel = ({
+         modelStartPos.current = { x: matrix[12], y: matrix[13] };
+       }
+     }
+-  }, [canvasRef, modelInfo]);
++  }, [canvasRef, modelInfo, isPet]);
+ 
+   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+     const adapter = (window as any).getLAppAdapter?.();
+     const view = LAppDelegate.getInstance().getView();
+     const model = adapter?.getModel();
+ 
++    // Asistente: presionado sobre la cabeza sin Ctrl y frotando = caricia
++    if (isPet && isPotentialTapRef.current && !dragConCtrlRef.current && toqueRef.current.zona === 'cabeza') {
++      const t = toqueRef.current;
++      t.recorrido += Math.abs(e.clientX - t.ultimoX);
++      t.ultimoX = e.clientX;
++      if (!caricia.activa && t.recorrido > 40) caricia.empezar();
++      if (caricia.activa && canvasRef.current) {
++        caricia.mover(e.clientX - canvasRef.current.getBoundingClientRect().left);
++      }
++    }
++
+     // --- Start Drag Logic ---
+-    if (isPotentialTapRef.current && adapter && view && model && canvasRef.current) {
++    if (isPotentialTapRef.current && (!isPet || dragConCtrlRef.current) && adapter && view && model && canvasRef.current) {
+       const timeElapsed = Date.now() - mouseDownTimeRef.current;
+       const deltaX = e.clientX - mouseDownPosRef.current.x;
+       const deltaY = e.clientY - mouseDownPosRef.current.y;
+@@ -349,6 +379,14 @@ export const useLive2DModel = ({
+           modelPositionRef.current = finalPos;
+           modelStartPos.current = finalPos; // Update base position for next potential drag
+           setPosition(finalPos);
++          // Asistente: recordar dónde la dejó el usuario (se aplica al cargar, ver lappmodel.ts)
++          if (isPet) {
++            try {
++              localStorage.setItem(`asistentePos:${currentModel._modelHomeDir}`, JSON.stringify(finalPos));
++            } catch (error) {
++              console.warn('No se pudo guardar la posición de Asistente:', error);
++            }
++          }
+         }
+       }
+     } else if (isPotentialTapRef.current && adapter && model && view && canvasRef.current) {
+@@ -358,8 +396,15 @@ export const useLive2DModel = ({
+       const deltaY = e.clientY - mouseDownPosRef.current.y;
+       const distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+ 
+-      // Check if it qualifies as a tap (short duration, minimal movement)
+-      if (timeElapsed < TAP_DURATION_THRESHOLD_MS && distanceMoved < DRAG_DISTANCE_THRESHOLD_PX) {
++      // Asistente: sin Ctrl en modo mascota: caricia que termina, o toque corto (cabeza = uwu,
++      // mejilla = guiño) si casi no se movió
++      clearTimeout(sostenerRef.current);
++      if (caricia.activa) {
++        caricia.terminar();
++      } else if (isPet && !dragConCtrlRef.current && distanceMoved < 12 && timeElapsed < CARICIA_SOSTENIDA_MS) {
++        reaccionarToque(toqueRef.current.zona);
++      } else if (timeElapsed < TAP_DURATION_THRESHOLD_MS && distanceMoved < DRAG_DISTANCE_THRESHOLD_PX) {
++        // Check if it qualifies as a tap (short duration, minimal movement)
+         const allowTapMotion = modelInfo?.pointerInteractive !== false;
+ 
+         if (allowTapMotion && modelInfo?.tapMotions) {
+@@ -382,7 +427,7 @@ export const useLive2DModel = ({
+ 
+     // Reset potential tap flag regardless of outcome
+     isPotentialTapRef.current = false;
+-  }, [isDragging, canvasRef, modelInfo]);
++  }, [isDragging, isPet, canvasRef, modelInfo]);
+ 
+   const handleMouseLeave = useCallback(() => {
+     if (isDragging) {
+@@ -393,6 +438,8 @@ export const useLive2DModel = ({
+     if (isPotentialTapRef.current) {
+       isPotentialTapRef.current = false;
+     }
++    clearTimeout(sostenerRef.current);
++    caricia.terminar(); // Asistente: la mano salió de la ventana
+     // --- Pet Hover Logic (Unchanged) ---
+     if (isPet && electronApi && isHoveringModelRef.current) {
+       isHoveringModelRef.current = false;
+diff --git a/src/renderer/src/hooks/electron/use-input-subtitle.ts b/src/renderer/src/hooks/electron/use-input-subtitle.ts
+index de5e311..8175e99 100644
+--- a/src/renderer/src/hooks/electron/use-input-subtitle.ts
++++ b/src/renderer/src/hooks/electron/use-input-subtitle.ts
+@@ -23,10 +23,12 @@ export function useInputSubtitle() {
+   const { aiState, setAiState } = useAiState();
+   const { interrupt } = useInterrupt();
+ 
++  // Asistente: no mostrar en la burbuja los resultados internos de herramientas ni las
++  // etiquetas de emoción ([joy], [sad]...) ni el markdown (**negritas**)
+   const lastAIMessage = messages
+-    .filter((msg) => msg.role === 'ai')
++    .filter((msg) => msg.role === 'ai' && msg.type !== 'tool_call_status')
+     .slice(-1)
+-    .map((msg) => msg.content)[0];
++    .map((msg) => msg.content?.replace(/\s*\[[a-z_]+\]\s*/gi, ' ').replace(/[*#`]+/g, '').trim())[0];
+ 
+   const hasAIMessages = messages.some((msg) => msg.role === 'ai');
+ 
+diff --git a/src/renderer/src/hooks/utils/use-audio-task.ts b/src/renderer/src/hooks/utils/use-audio-task.ts
+index 27cba68..7780964 100644
+--- a/src/renderer/src/hooks/utils/use-audio-task.ts
++++ b/src/renderer/src/hooks/utils/use-audio-task.ts
+@@ -127,12 +127,18 @@ export const useAudioTask = () => {
+ 
+         // Set expression if available
+         const lappAdapter = (window as any).getLAppAdapter?.();
+-        if (lappAdapter && expressions?.[0] !== undefined) {
+-          setExpression(
+-            expressions[0],
+-            lappAdapter,
+-            `Set expression to: ${expressions[0]}`,
+-          );
++        // Asistente: pasar directo de una cara a otra. Se saltan "neutral" (Qwen la pone al inicio de casi todo; a la
++        // cara normal se vuelve sola tras 4 s de silencio) y la misma que ya tiene (reiniciarla la hacía pasar
++        // un momento por la normal)
++        const nombreDe = (e: string | number) => (typeof e === 'number' ? lappAdapter?.getExpressionName(e) : e);
++        const neutral = lappAdapter?.getExpressionName(0);
++        const caras = ((expressions ?? []) as (string | number)[]).filter((e) => nombreDe(e) !== neutral);
++        const aplicar = (e: string | number) => {
++          if (nombreDe(e) === lappAdapter?.getModel()?._currentExpression) return;
++          setExpression(e, lappAdapter, `Set expression to: ${e}`);
++        };
++        if (lappAdapter && caras[0] !== undefined) {
++          aplicar(caras[0]);
+         }
+ 
+         // Start talk motion
+@@ -153,7 +159,12 @@ export const useAudioTask = () => {
+         audioManager.setCurrentAudio(audio, model);
+         let isFinished = false;
+ 
++        // Asistente: si la frase trae varias expresiones, repartirlas a lo largo del audio
++        // (antes solo se aplicaba la primera)
++        const timersExpresion: ReturnType<typeof setTimeout>[] = [];
++
+         const cleanup = () => {
++          timersExpresion.forEach(clearTimeout);
+           audioManager.clearCurrentAudio(audio);
+           if (!isFinished) {
+             isFinished = true;
+@@ -178,6 +189,18 @@ export const useAudioTask = () => {
+             cleanup();
+           });
+ 
++          const lista = caras;
++          if (lista.length > 1 && lappAdapter && Number.isFinite(audio.duration)) {
++            const tramo = (audio.duration * 1000) / lista.length;
++            for (let i = 1; i < lista.length; i++) {
++              if (lista[i] === lista[i - 1]) continue;
++              timersExpresion.push(setTimeout(() => {
++                if (stateRef.current.aiState === 'interrupted') return;
++                aplicar(lista[i]);
++              }, i * tramo));
++            }
++          }
++
+           // Setup lip sync
+           if (model._wavFileHandler) {
+             if (!model._wavFileHandler._initialized) {

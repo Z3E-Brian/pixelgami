@@ -1,0 +1,18 @@
+# Recordatorios que llegan como notificación de la asistente (aunque esté apagada) y, opcional, Google Calendar.
+# Extras fuera de la conversación: el servicio de avisos (python3 -m funciones.recordatorios.avisos vigilar) y la
+# ventanita para anotarlos (python3 -m funciones.recordatorios.ventana). Ver docs/CONECTAR.md.
+tema: recordatorio
+orden: 80
+descripcion: |-
+  que le recuerde o le avise algo a cierta hora o día ("recuérdame mañana...", "avísame en 20 minutos
+    q...", "ponme un recordatorio..."), qué recordatorios tiene o quitar uno. Un dato para que {asistente} lo sepa, sin
+    hora ("acuérdate de que me gusta el phonk", "apunta que mi cumple es en marzo"), es "charla". Apuntar, agendar o
+    guardar algo futuro con fecha ("apunta en el calendario el examen el 5", "agéndame el dentista el viernes", "agenda un
+    examen para el 12", "guarda una cita con el médico el martes a las 9") SÍ es "recordatorio".
+    Preguntar qué tiene en su calendario o agenda ("¿qué tengo mañana?") es "charla", no "recordatorio".
+ejemplos: |-
+  {usuario}: "recuérdame mañana a las 3 que entregue lo de Proyectos" / "avísame en 20 min q saque la ropa" -> temas ["recordatorio"]
+  {asistente}: "¿Para cuándo te recuerdo sacar la basura?" / {usuario}: "a las 5" -> orden "recuérdame a las 5 sacar la basura",
+    temas ["recordatorio"]
+  {usuario}: "qué recordatorios tengo" / "quita el recordatorio del gym" -> temas ["recordatorio"]
+si_falla: No pudiste agendar el recordatorio ({error}). Díselo en una frase.

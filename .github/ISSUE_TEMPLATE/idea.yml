@@ -1,0 +1,13 @@
+name: Proponer una idea
+description: Una función nueva, una herramienta o una mejora
+labels: [idea]
+body:
+  - type: textarea
+    attributes:
+      label: Qué te gustaría
+      description: Qué quieres poder hacer y un par de ejemplos de cómo se lo pedirías a la asistente.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Cómo lo harías (opcional)
