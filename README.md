@@ -36,6 +36,37 @@ y [docs/VOCES.md](docs/VOCES.md).
 - **Caras**: cada respuesta trae emociones (`[joy]`, `[shy]`…) que se vuelven expresiones del modelo Live2D
   ([docs/EXPRESIONES.md](docs/EXPRESIONES.md)); reacciona si le tocas la cabeza o la mejilla.
 
+## Qué es de Open-LLM-VTuber y qué es de este proyecto
+
+| De [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) (upstream, sin cambios) | De este proyecto |
+|---|---|
+| El servidor (WebSocket), la conversación por turnos, el historial y el agente que llama al LLM | El **router de intención** y el contexto automático (`agent/asistente_contexto.py`) |
+| Los conectores a Ollama, Gemini y otros LLM; Edge TTS; el cliente MCP | Las **8 funciones** de `funciones/` y cómo se cargan (`funcion.yaml` + `funcion.py`) |
+| El cliente de escritorio (Electron + React) y el render Live2D | Los **5 servidores MCP** (`*-mcp/`): acciones, memoria con embeddings, Google, música, Claude |
+| | La memoria, el diario y lo que aprende sola (`agent/asistente_diario.py`) |
+| | Whisper por `whisper.cpp` en la GPU, voz RVC, filtros de cada frase (coletillas, cara por frase, datos inventados) |
+| | El modo mascota en Linux/Hyprland (forma recortada, mirada, toques) y los scripts de `escritorio/` |
+| | Pruebas (unittest y con el modelo), métrica del router, CI, instalador y documentación |
+
+Los cambios a archivos de upstream son pocos y van como parches (`parches/*/cambios.patch`, los ganchos que llaman a
+lo propio); los archivos nuevos, en `parches/*/nuevos/`.
+
+Cómo viaja una frase:
+
+```mermaid
+flowchart LR
+    mic[Micrófono] --> asr[Whisper<br/>whisper.cpp]
+    asr --> router[Router de intención<br/>Qwen3 8B local]
+    router -->|temas| fn[Funciones<br/>entender → ejecutar]
+    fn --> mcp[Servidores MCP<br/>acciones, memoria, correo…]
+    router -->|charla| ctx[Contexto<br/>memoria, hábitos, datos]
+    fn --> ctx
+    ctx --> llm[LLM que responde<br/>Qwen3 o Gemini]
+    llm --> filtros[Filtros por frase]
+    filtros --> tts[Edge TTS / RVC]
+    filtros --> cara[Expresión Live2D]
+```
+
 ## Instalar
 
 La guía paso a paso (pensada para seguirla a mano o dársela a un agente) está en
@@ -75,6 +106,8 @@ escritorio/                 scripts de Hyprland: mostrar/ocultar, apagar, reinic
 herramientas/               agregar-modelo.py (adaptar un modelo Live2D), nueva-funcion.py, comprobar.py
 funciones/                  lo que sabe hacer, una carpeta por función (ventanas, correo, música, internet…)
 datos/                      lo que guardan las funciones (no va al repo)
+pruebas_intencion.py        pruebas con el modelo: router y funciones (ver docs/FUNCIONES.md, "Probarlas")
+evaluacion/                 métrica del router: acierto por tema, matriz de confusión, tiempos -> resultados/
 docs/                       instalar, conectar, modelos, expresiones, voces, crear funciones y herramientas
 ```
 
