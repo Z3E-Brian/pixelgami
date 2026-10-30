@@ -5,6 +5,13 @@ cambiar de forma incompatible entre versiones; cada cambio de configuración dic
 
 ## Sin publicar
 
+- Métrica del router: `pruebas_intencion.py` da el % de acierto por tema, la matriz de confusión entre temas y el
+  tiempo por mensaje, y los guarda en `resultados/eval_<fecha>_<modelo>.json` y `.csv` (`evaluacion/`).
+  `--modelo` compara modelos de Ollama o Gemini como router; `--solo-router` y `--pausa` para corridas largas.
+- El CI corre las pruebas sin modelo (`python -m unittest discover -p "test_*.py"`); badge en el README.
+- README: qué es de Open-LLM-VTuber y qué es propio, diagrama de cómo viaja una frase, cómo correr las pruebas, y
+  versión en inglés (`README.en.md`).
+
 ## v0.1.0
 
 Primera versión pública.
