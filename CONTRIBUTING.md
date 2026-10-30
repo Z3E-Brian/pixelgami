@@ -10,7 +10,8 @@
 ## Mandar un cambio (Pull Request)
 1. Haz un fork y una rama a partir de `dev` (no de `main`: `main` es la última versión publicada).
 2. Cambios chicos y de un solo tema por PR; explica el porqué en la descripción.
-3. Corre `python3 herramientas/comprobar.py --importar`. Si tocaste el router o los intérpretes (lo que entiende
+3. Corre `python3 herramientas/comprobar.py --importar` y las pruebas sin modelo
+   (`python3 -m unittest discover -p "test_*.py"`, las mismas que corre el CI). Si tocaste el router o los intérpretes (lo que entiende
    la asistente), suma casos a `pruebas_intencion.py` (varias formas distintas de decir lo mismo) y córrelas.
 4. Si cambias la configuración (`perfil.yaml`, `conf.yaml`, `entorno.sh`), actualiza los ejemplos y la doc, y
    anótalo en `CHANGELOG.md` bajo "Sin publicar" con cómo migrar.

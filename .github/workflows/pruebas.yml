@@ -14,3 +14,6 @@ jobs:
         run: ./instalar.sh --python
       - name: Comprobar (compila, configs, modelo activo, importa)
         run: Open-LLM-VTuber/.venv/bin/python herramientas/comprobar.py --importar
+      # las pruebas sin modelo (unittest): funciones/*/test_*.py y los demás paquetes del repo
+      - name: Pruebas unitarias
+        run: Open-LLM-VTuber/.venv/bin/python -m unittest discover -p "test_*.py" -v

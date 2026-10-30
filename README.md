@@ -1,5 +1,7 @@
 # Pixelgami
 
+[![Pruebas](https://github.com/Z3E-Brian/pixelgami/actions/workflows/pruebas.yml/badge.svg)](https://github.com/Z3E-Brian/pixelgami/actions/workflows/pruebas.yml)
+
 *Pixel + kami (神, espíritu): como los tsukumogami del folclore japonés, los objetos que cobran
 alma con los años, pero en tu PC.*
 
