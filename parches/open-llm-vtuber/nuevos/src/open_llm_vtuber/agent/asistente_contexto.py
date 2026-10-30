@@ -210,11 +210,11 @@ def respuesta_entregada() -> None:
         f.respondio()
 
 
-def _qwen_json(sistema: str, texto: str, esquema: dict) -> dict | None:
-    """Salida estructurada de Qwen; None si Ollama no responde."""
+def _qwen_json(sistema: str, texto: str, esquema: dict, nombre_modelo: str = MODELO_LOCAL) -> dict | None:
+    """Salida estructurada de Qwen (u otro modelo de Ollama, para compararlos); None si Ollama no responde."""
     import urllib.request
     try:
-        cuerpo = {"model": MODELO_LOCAL, "stream": False, "think": False, "keep_alive": "30m", "format": esquema,
+        cuerpo = {"model": nombre_modelo, "stream": False, "think": False, "keep_alive": "30m", "format": esquema,
                   "options": {"temperature": 0}, "messages": [{"role": "system", "content": sistema},
                                                               {"role": "user", "content": texto}]}
         req = urllib.request.Request("http://127.0.0.1:11434/api/chat", json.dumps(cuerpo).encode(),
@@ -324,9 +324,10 @@ def _corregir_temas(temas: list[str], texto: str, orden: str) -> list[str]:
     return temas
 
 
-def _router(texto: str) -> dict | None:
+def _router(texto: str, modelo=None) -> dict | None:
     """{"orden", "temas", "necesita", "combinado"} para este mensaje; None si Ollama no responde (entonces,
-    los detectores de cada función)."""
+    los detectores de cada función). modelo: el que decide (por defecto _qwen_json; la evaluación de
+    pruebas_intencion.py compara otros con la misma firma)."""
     contexto = []
     if asistente_diario._ultima_respuesta:
         dicho = re.sub(r"\[[a-z]+\]\s*", "", asistente_diario._ultima_respuesta)[:400]
@@ -334,7 +335,7 @@ def _router(texto: str) -> dict | None:
     if _conversacion["usuario"]:
         contexto.append(f"Mensaje anterior de {USUARIO}: «{_conversacion['usuario'][:200]}»")
     contexto += [t for f in FUNCIONES if (t := f.para_el_router())]  # "última búsqueda: ..."
-    r = _qwen_json(ROUTER, "\n".join(contexto + [f"{USUARIO}: {texto}"]), ESQUEMA_ROUTER)
+    r = (modelo or _qwen_json)(ROUTER, "\n".join(contexto + [f"{USUARIO}: {texto}"]), ESQUEMA_ROUTER)
     if not r or not r.get("temas"):
         return None
     r["orden"] = (r.get("orden") or "").strip() or texto

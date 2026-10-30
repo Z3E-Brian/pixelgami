@@ -4,6 +4,12 @@ Solo interpreta: NO ejecuta nada.
     cd ~/.local/share/pixelgami/Open-LLM-VTuber && uv run python ../pruebas_intencion.py
     ... ../pruebas_intencion.py correo web     solo los casos de esas funciones
     ... ../pruebas_intencion.py nucleo         solo la charla
+    ... ../pruebas_intencion.py --modelo qwen3:8b                  el router con otro modelo de Ollama
+    ... ../pruebas_intencion.py --modelo gemini:gemini-3.5-flash --pausa 7   con Gemini (pausa: su cuota por minuto)
+    ... ../pruebas_intencion.py --solo-router  sin la cadena router -> entender (más rápido, para comparar modelos)
+
+Del router sale además un reporte (evaluacion/metrica.py): % de acierto por tema, matriz de confusión y tiempo por
+mensaje, guardado en resultados/eval_<fecha>_<modelo>.json y .csv.
 
 Los casos de cada función están en funciones/<función>/pruebas.py:
   ROUTER        (último mensaje de la asistente, mensaje anterior del usuario, lo que dice, temas esperados, palabras
@@ -13,14 +19,18 @@ Los casos de cada función están en funciones/<función>/pruebas.py:
                 preparar() / limpiar() arman y quitan el estado que necesitan (una búsqueda ya hecha...).
 Aquí solo están los de la charla, que es del núcleo: lo que NO debe ir a ninguna función.
 """
+import argparse
 import datetime
+import functools
 import importlib
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "Open-LLM-VTuber/src"))
-sys.path.insert(0, str(Path(__file__).parent))  # funciones/
+BASE = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE / "Open-LLM-VTuber/src"))
+sys.path.insert(0, str(BASE))  # funciones/, evaluacion/
 from open_llm_vtuber.agent import asistente_contexto as m  # noqa: E402
+from evaluacion import metrica, modelos  # noqa: E402
 
 m.asistente_diario.ESPERA_DIARIO = 10**9  # que no se ponga a escribir el diario durante la prueba
 
@@ -45,23 +55,21 @@ def conversacion(asistente: str, usuario_antes: str) -> None:
     m._conversacion["usuario"] = usuario_antes
 
 
-def probar_router(casos: list[tuple], nombre: str) -> int:
-    fallos = 0
-    for asistente, usuario_antes, texto, esperados, palabras in casos:
-        conversacion(asistente, usuario_antes)
-        r = m._router(texto) or {"temas": [], "orden": ""}
-        temas, orden = set(r["temas"]), r.get("combinado", r["orden"]).lower()
-        # "charla" junto con otro tema esperado no estorba; lo que importa es no perder ni inventar temas de acción
-        accion = lambda t: t - {"charla"}  # noqa: E731
-        ok = (accion(temas) == accion(esperados) if accion(esperados) else not accion(temas) or temas <= esperados)
-        ok = ok and all(p in orden for p in palabras)
-        fallos += not ok
-        print(f"{'OK ' if ok else 'MAL'} {texto[:60]!r:64} -> {sorted(temas)} «{r['orden'][:70]}»")
-    print(f"\n{len(casos) - fallos}/{len(casos)} bien (router: {nombre})\n")
-    return fallos
+def probar_router(casos: list[tuple], modelo, nombre_modelo: str, pausa: float = 0.0) -> list[metrica.Medida]:
+    def enrutar(caso):
+        conversacion(caso[0], caso[1])
+        return m._router(caso[2], modelo)
+
+    medidas = []
+    for med in metrica.medir(casos, enrutar, pausa):
+        medidas.append(med)
+        print(f"{'OK ' if med.bien else 'MAL'} {med.texto[:60]!r:64} -> {sorted(med.temas)} «{med.orden[:70]}» "
+              f"{med.segundos:.1f} s")
+    print(f"\n{sum(x.bien for x in medidas)}/{len(medidas)} bien (router: {nombre_modelo})\n")
+    return medidas
 
 
-def probar_cadena(f, pruebas) -> int:
+def probar_cadena(f, pruebas, modelo) -> int:
     """Router -> f.entender y su aviso (las mismas funciones que preparar); entender no ejecuta nada."""
     casos = getattr(pruebas, "CADENA", [])
     if not casos:
@@ -71,10 +79,10 @@ def probar_cadena(f, pruebas) -> int:
     for caso in casos:
         asistente, usuario_antes, texto = caso[:3]
         conversacion(asistente, usuario_antes)
-        r = m._router(texto)
+        r = m._router(texto, modelo)
         temas = set(r["temas"]) if r else set()
         pedido = m.pedido_de(texto, r, datetime.datetime.now(), temas)
-        i = (f.entender(pedido, m._qwen_json)
+        i = (f.entender(pedido, modelo)
              if f.tema in temas or getattr(pruebas, "CON_CUALQUIER_TEMA", False) else None)
         aviso = m.aviso_de(texto, [f.aviso(i)]) if i is not None else ""
         ok, visto = pruebas.revisar(caso, i, aviso)
@@ -86,7 +94,17 @@ def probar_cadena(f, pruebas) -> int:
 
 
 def main() -> int:
-    pedidas = set(sys.argv[1:])
+    a = argparse.ArgumentParser(description="Pruebas del router y de cada función con el modelo (no ejecuta nada).")
+    a.add_argument("funciones", nargs="*", help="solo los casos de estas funciones ('nucleo': la charla)")
+    a.add_argument("--modelo", help=f"quién hace de router: qwen3:8b, ollama:<modelo> o gemini:<modelo> "
+                                    f"(por defecto el de conf.yaml: {m.MODELO_LOCAL})")
+    a.add_argument("--pausa", type=float, default=0.0, help="segundos entre mensajes (cuota de una API)")
+    a.add_argument("--solo-router", action="store_true", help="sin las cadenas router -> entender")
+    a.add_argument("--resultados", type=Path, default=BASE / "resultados", help="dónde guardar el reporte")
+    op = a.parse_args()
+    nombre_modelo, modelo = modelos.elegir(op.modelo or m.MODELO_LOCAL,
+                                           lambda nombre: functools.partial(m._qwen_json, nombre_modelo=nombre))
+    pedidas = set(op.funciones)
     de_funciones = []
     for f in m.FUNCIONES:
         if pedidas and f.nombre not in pedidas:
@@ -95,11 +113,21 @@ def main() -> int:
             de_funciones.append((f, importlib.import_module(f"funciones.{f.nombre}.pruebas")))
         except ModuleNotFoundError:
             print(f"(funciones/{f.nombre} no trae pruebas.py)\n")
-    fallos = 0
     casos = (CASOS if not pedidas or "nucleo" in pedidas else []) + [
         c for _, p in de_funciones for c in getattr(p, "ROUTER", [])]
-    fallos += probar_router(casos, ", ".join(sorted(pedidas)) or "todo")
-    fallos += sum(probar_cadena(f, p) for f, p in de_funciones)
+    fecha = datetime.datetime.now()
+    # un mensaje sin medir: que la carga del modelo (Ollama en frío tarda varios segundos) no cuente en el tiempo
+    conversacion("", "")
+    m._router("hola", modelo)
+    medidas = probar_router(casos, modelo, nombre_modelo, op.pausa)
+    fallos = sum(not x.bien for x in medidas)
+    if medidas:
+        rep = metrica.reporte(medidas, nombre_modelo, fecha)
+        print(metrica.como_texto(rep))
+        ruta_json, ruta_csv = metrica.guardar(rep, medidas, op.resultados)
+        print(f"\nReporte: {ruta_json} y {ruta_csv}\n")
+    if not op.solo_router:
+        fallos += sum(probar_cadena(f, p, modelo) for f, p in de_funciones)
     print(f"Total: {fallos} fallo(s).")
     return fallos
 

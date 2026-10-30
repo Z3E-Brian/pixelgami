@@ -169,7 +169,7 @@ Reinicia la asistente (Super+Shift+Z o `escritorio/asistente_reiniciar.sh`).
 ## Probarlas
 
 ```bash
-python3 -m unittest discover -s funciones -t .                            # sin modelo, todas
+python3 -m unittest discover -p "test_*.py"                              # sin modelo, todas (como el CI)
 cd Open-LLM-VTuber && uv run python ../pruebas_intencion.py clima         # con el modelo, solo la tuya
 cd Open-LLM-VTuber && uv run python ../pruebas_intencion.py               # todo (antes de un PR)
 ```
@@ -186,6 +186,27 @@ cd Open-LLM-VTuber && uv run python ../pruebas_intencion.py               # todo
 
 Cuando agregues una función, corre **todas** las pruebas: un tema nuevo puede quitarle mensajes a otro. En un
 PR, pega los totales de antes y después.
+
+### Métrica del router
+
+Además de OK/MAL por caso, `pruebas_intencion.py` arma con los casos `ROUTER` un reporte
+([evaluacion/metrica.py](../evaluacion/metrica.py)): el % de acierto total y por tema, la **matriz de confusión**
+(fila: el tema esperado; columna: el que eligió el router; `—`: lo perdió sin elegir otro) y el tiempo promedio,
+mediana y máximo por mensaje. Lo guarda en `resultados/eval_<fecha>_<modelo>.json` (el reporte completo, con los
+fallos) y `.csv` (un caso por fila, para comparar corridas). Un caso cuenta como mal si el modelo no respondió.
+
+Para comparar modelos como router (`--solo-router` se salta las cadenas de cada función):
+
+```bash
+cd Open-LLM-VTuber
+uv run python ../pruebas_intencion.py --solo-router                                  # el de conf.yaml (Qwen3 8B)
+uv run python ../pruebas_intencion.py --solo-router --modelo qwen3:4b                # otro de Ollama
+uv run python ../pruebas_intencion.py --solo-router --modelo gemini:gemini-3.5-flash --pausa 7
+```
+
+Con Gemini la clave sale de `GEMINI_API_KEY` o `~/.config/pixelgami/gemini.key`, y `--pausa` (segundos entre
+mensajes) evita pasarse de la cuota por minuto de la capa gratis; la pausa no cuenta en el tiempo medido. El primer
+mensaje de cada corrida no se mide: es el que carga el modelo.
 
 ### Prueba de fuego (opcional, antes de una versión)
 

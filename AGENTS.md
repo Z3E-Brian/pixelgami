@@ -26,5 +26,6 @@ Si te pidieron instalar, adaptar o modificar este proyecto:
 - Textos para el modelo: con marcadores de `identidad.py` (`{usuario}`, `{asistente}`, `{él}`, `sol{a}`…) y
   `nombres()`; nunca nombres de personas a mano.
 - Antes de un PR: `python3 herramientas/comprobar.py --importar`; si tocaste el router o los intérpretes, agrega
-  casos a `pruebas_intencion.py` y córrelas (necesita Ollama).
+  casos a `pruebas_intencion.py` y córrelas (necesita Ollama); deja el reporte de `resultados/` de antes y
+  después. Las pruebas sin modelo: `python3 -m unittest discover -p "test_*.py"`.
 - Ver [CONTRIBUTING.md](CONTRIBUTING.md).
