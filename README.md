@@ -2,6 +2,8 @@
 
 [![Pruebas](https://github.com/Z3E-Brian/pixelgami/actions/workflows/pruebas.yml/badge.svg)](https://github.com/Z3E-Brian/pixelgami/actions/workflows/pruebas.yml)
 
+**Español** · [English](README.en.md)
+
 *Pixel + kami (神, espíritu): como los tsukumogami del folclore japonés, los objetos que cobran
 alma con los años, pero en tu PC.*
 
@@ -109,6 +111,13 @@ datos/                      lo que guardan las funciones (no va al repo)
 pruebas_intencion.py        pruebas con el modelo: router y funciones (ver docs/FUNCIONES.md, "Probarlas")
 evaluacion/                 métrica del router: acierto por tema, matriz de confusión, tiempos -> resultados/
 docs/                       instalar, conectar, modelos, expresiones, voces, crear funciones y herramientas
+```
+
+## Pruebas
+
+```bash
+python3 -m unittest discover -p "test_*.py"                                   # sin modelo (lo que corre el CI)
+cd Open-LLM-VTuber && uv run python ../pruebas_intencion.py --solo-router     # el router con el modelo + reporte
 ```
 
 ## Contribuir
